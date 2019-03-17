@@ -1,85 +1,112 @@
-![GitHub Logo](https://github.com/gnea/gnea-Media/blob/master/Grbl%20Logo/Grbl%20Logo%20250px.png?raw=true)
+# MaslowCNC-Due
 
-***
-_Click the `Release` tab to download pre-compiled `.hex` files or just [click here](https://github.com/gnea/grbl/releases)_
-***
-Grbl is a no-compromise, high performance, low cost alternative to parallel-port-based motion control for CNC milling. This version of Grbl runs on an Arduino with a 328p processor (Uno, Duemilanove, Nano, Micro, etc).
+### This is firmware to control a Maslow CNC type machine
 
-The controller is written in highly optimized C utilizing every clever feature of the AVR-chips to achieve precise timing and asynchronous operation. It is able to maintain up to 30kHz of stable, jitter free control pulses.
+# About this upgrade...
 
-It accepts standards-compliant g-code and has been tested with the output of several CAM tools with no problems. Arcs, circles and helical motion are fully supported, as well as, all other primary g-code commands. Macro functions, variables, and most canned cycles are not supported, but we think GUIs can do a much better job at translating them into straight g-code anyhow.
+The [MaslowCNC firmware](https://github.com/MaslowCNC/Firmware) and [GroundControl](https://github.com/MaslowCNC/GroundControl) front end software work well, but common points of discussion in the community is that it is slow and doesn't move smoothly (no accel/decel or chaining of vectors).  
 
-Grbl includes full acceleration management with look ahead. That means the controller will look up to 16 motions into the future and plan its velocities ahead to deliver smooth acceleration and jerk-free cornering.
-
-* [Licensing](https://github.com/gnea/grbl/wiki/Licensing): Grbl is free software, released under the GPLv3 license.
-
-* For more information and help, check out our **[Wiki pages!](https://github.com/gnea/grbl/wiki)** If you find that the information is out-dated, please to help us keep it updated by editing it or notifying our community! Thanks!
-
-* Lead Developer: Sungeun "Sonny" Jeon, Ph.D. (USA) aka @chamnit
-
-* Built on the wonderful Grbl v0.6 (2011) firmware written by Simen Svale Skogsrud (Norway).
-
-***
-
-### Official Supporters of the Grbl CNC Project
-![Official Supporters](https://github.com/gnea/gnea-Media/blob/master/Contributors.png?raw=true)
-
-
-***
-
-## Update Summary for v1.1
-- **IMPORTANT:** Your EEPROM will be wiped and restored with new settings. This is due to the addition of two new spindle speed '$' settings.
-
-- **Real-time Overrides** : Alters the machine running state immediately with feed, rapid, spindle speed, spindle stop, and coolant toggle controls. This awesome new feature is common only on industrial machines, often used to optimize speeds and feeds while a job is running. Most hobby CNC's try to mimic this behavior, but usually have large amounts of lag. Grbl executes overrides in realtime and within tens of milliseconds.
-
-- **Jogging Mode** : The new jogging commands are independent of the g-code parser, so that the parser state doesn't get altered and cause a potential crash if not restored properly. Documentation is included on how this works and how it can be used to control your machine via a joystick or rotary dial with a low-latency, satisfying response.
-
-- **Laser Mode** : The new "laser" mode will cause Grbl to move continuously through consecutive G1, G2, and G3 commands with spindle speed changes. When "laser" mode is disabled, Grbl will instead come to a stop to ensure a spindle comes up to speed properly. Spindle speed overrides also work with laser mode so you can tweak the laser power, if you need to during the job. Switch between "laser" mode and "normal" mode via a `$` setting.
-
-	- **Dynamic Laser Power Scaling with Speed** : If your machine has low accelerations, Grbl will automagically scale the laser power based on how fast Grbl is traveling, so you won't have burnt corners when your CNC has to make a turn! Enabled by the `M4` spindle CCW command when laser mode is enabled!
-
-- **Sleep Mode** : Grbl may now be put to "sleep" via a `$SLP` command. This will disable everything, including the stepper drivers. Nice to have when you are leaving your machine unattended and want to power down everything automatically. Only a reset exits the sleep state.
-
-- **Significant Interface Improvements**: Tweaked to increase overall performance, include lots more real-time data, and to simplify maintaining and writing GUIs. Based on direct feedback from multiple GUI developers and bench performance testing. _NOTE: GUIs need to specifically update their code to be compatible with v1.1 and later._
-
-	- **New Status Reports**: To account for the additional override data, status reports have been tweaked to cram more data into it, while still being smaller than before. Documentation is included, outlining how it has been changed. 
-	- **Improved Error/Alarm Feedback** : All Grbl error and alarm messages have been changed to providing a code. Each code is associated with a specific problem, so users will know exactly what is wrong without having to guess. Documentation and an easy to parse CSV is included in the repo.
-	- **Extended-ASCII realtime commands** : All overrides and future real-time commands are defined in the extended-ASCII character space. Unfortunately not easily type-able on a keyboard, but helps prevent accidental commands from a g-code file having these characters and gives lots of space for future expansion.
-	- **Message Prefixes** : Every message type from Grbl has a unique prefix to help GUIs immediately determine what the message is and parse it accordingly without having to know context. The prior interface had several instances of GUIs having to figure out the meaning of a message, which made everything more complicated than it needed to be.
-
-- New OEM specific features, such as safety door parking, single configuration file build option, EEPROM restrictions and restoring controls, and storing product data information.
+The behavior of this revised setup will sound and act a bit different than what may have experienced with a previous stock-Maslow CNC setup. This new [GRBL](https://github.com/gnea/grbl)-driven system will be faster overall due to the splining of vectors as the machine moves. The top speed will still be limited by the use of the original Maslow CNC gear motors which will only go to about 20RPM which is about 1000mm/min.
  
-- New safety door parking motion as a compile-option. Grbl will retract, disable the spindle/coolant, and park near Z max. When resumed, it will perform these task in reverse order and continue the program. Highly configurable, even to add more than one parking motion. See config.h for details.
+Please note that the chain configuration of this supplied software is for an 'under-sprocket' chain to a sled-ring system. The sled-ring keeps the math to a simple triangular system and that makes it easier to compensate out any errors over the working area.
 
-- New '$' Grbl settings for max and min spindle rpm. Allows for tweaking the PWM output to more closely match true spindle rpm. When max rpm is set to zero or less than min rpm, the PWM pin D11 will act like a simple enable on/off output.
+## Setting up the Firmware Development Environment
 
-- Updated G28 and G30 behavior from NIST to LinuxCNC g-code description. In short, if a intermediate motion is specified, only the axes specified will move to the stored coordinates, not all axes as before.
+First clone the Firmware repository, then install and setup the Arduino IDE.
 
-- Lots of minor bug fixes and refactoring to make the code more efficient and flexible.
+### Using Arduino IDE
+1. Download [Arduino IDE](https://www.arduino.cc/en/main/software) 1.8.1 or higher
+2. Install Arduino IDE and run Arduino IDE
+3. Navigate menus: File, Open
+4. In the file chooser navigate to the cloned repository and choose the "MaslowDue.ino" file to open
+5. Navigate menu: Tools, Board, change to "Arduino Due Programming Port"
+6. Navigate menu: Sketch -> Upload
 
-- **NOTE:** Arduino Mega2560 support has been moved to an active, official Grbl-Mega [project](http://www.github.com/gnea/grbl-Mega/). All new developments here and there will be synced when it makes sense to.
+# Maslow-Due Electronics
+The electronics which powers the Maslow-Due CNC Machine System is based on the original Maslow-CNC shield board. The Maslow-Due (DUE) requires that the Arduino Mega2560 board (standard to the MaslowCNC) be upgraded to an Arduino Due. Since the DUE runs at a lower power supply voltage (3.3V instead of 5V) shunt resistors, in parallel with each motor phase, are required to provide safe operating voltages from the encoders to the I/O pins of the DUE. Additional filter caps are also required to prevent positioning errors from noise spikes on the encoder cables. An **EEPROM must** be added to store the non-volatile parameters (the firmware will not work without it).
 
+![Circuit Adaptations](https://i.imgur.com/yb33BBk.png)
 
-```
-List of Supported G-Codes in Grbl v1.1:
-  - Non-Modal Commands: G4, G10L2, G10L20, G28, G30, G28.1, G30.1, G53, G92, G92.1
-  - Motion Modes: G0, G1, G2, G3, G38.2, G38.3, G38.4, G38.5, G80
-  - Feed Rate Modes: G93, G94
-  - Unit Modes: G20, G21
-  - Distance Modes: G90, G91
-  - Arc IJK Distance Modes: G91.1
-  - Plane Select Modes: G17, G18, G19
-  - Tool Length Offset Modes: G43.1, G49
-  - Cutter Compensation Modes: G40
-  - Coordinate System Modes: G54, G55, G56, G57, G58, G59
-  - Control Modes: G61
-  - Program Flow: M0, M1, M2, M30*
-  - Coolant Control: M7*, M8, M9
-  - Spindle Control: M3, M4, M5
-  - Valid Non-Command Words: F, I, J, K, L, N, P, R, S, T, X, Y, Z
-```
+# User Interface
+The Maslow Due system uses [GRBL](https://github.com/gnea/grbl) at its core therefore, any GRBL sender application will work with the Maslow Due firmware.  The default data rate is 38400 and mode is GRBL0. 
 
--------------
-Grbl is an open-source project and fueled by the free-time of our intrepid administrators and altruistic users. If you'd like to donate, all proceeds will be used to help fund supporting hardware and testing equipment. Thank you!
+The sender application, [bCNC](https://github.com/vlachoudis/bCNC) has been used with great success.
 
-[![Donate](https://www.paypalobjects.com/en_US/i/btn/btn_donate_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=CUGXJHXA36BYW)
+# System Setup
+The machine used with this Maslow-Due firmware uses a Meticulous-Z-Axis like setup which is an expansion of the Maslow CNC "stock" Z-axis kit:    http://maslowcommunitygarden.org/The-Meticulous-Z-Axis.html      Therefore, Z-Axis scaling and direction defaults are preset to such a configuration.
+
+Many of the parameters of GRBL are defaulted in the firmware and will not require adjustment, but some of the MaslowDue-specific parameters may require adjustment to fit your specific machine configuration.
+
+$81=2438.400 (Bed Width, mm) 	:   This defines a 8-foot wide work surface
+$82=1219.200 (Bed Height, mm) 	:   This defines a 4-foot high work surface
+
+## Machine Geometry
+The MaslowCNC machine that the MaslowDue firmware was developed for has a configuration as shown below:
+
+![MaslowCNC Due Configuration](https://imgur.com/nKiqUgj.png)
+
+$83=3021.013 (distBetweenMotors, mm)  :
+This is the measured distance from where the chain leaves the motor on the left to where the chain leaves the motor on the right. This was measured from the 8-o'clock position of the left sprocket to the 4-o'clock position on the right sprocket - at the center of the chain connecting pin.
+
+![Distance Between Motors Measurement](https://imgur.com/pplOCz5.png)
+
+$84=577.850 (motorOffsetY, mm)  :
+This is the distance perpendicular and down from a line that would exist between the two chain-exit sprocket positions in parameter $83 to the top edge of the work surface.
+
+$85=1.004 (XcorrScaling)  :
+For better overall accuracy, a test pattern can be cut and measured and a general scaling correction factor (%) can be applied to the X-axis. It is best to use a reference on the order of 1M or more in length.
+
+$86=0.998 (YcorrScaling)  :
+For better overall accuracy, a test pattern can be cut and measured and a general scaling correction factor (%) can be applied to the Y-axis. It is best to use a reference on the order of 1M in height.
+
+### Machine Home  ($HOME, $H)
+The MaslowDue firmware assumes that machine home is in the center of the work surface, and it is 0,0,0.  To set machine home, the sled can be placed near the center -- adjusting the chains manually, and the ***bCNC->Home*** button pressed (or the **$h** GRBL command can be issued.) Once the $HOME has been applied, jogging and homing repeatedly is okay. This is now the machine home. If you wish to work in a different area of the table, jog the sled to wherever the desired 0,0,0 for the part is to be located and apply a work offset. If $HOME is used instead, the machine calibration will be off. So, consider $HOME to be the calibrated origin for the machine. The machine's current positions are saved to EEPROM, but it is good to periodically check and reset $HOME to maintain the best possible accuracy,
+
+### Encoder Scaling
+$100=127.775 (x, step/mm)
+$101=127.775 (y, step/mm)
+$102=735.000 (z, step/mm) :
+These parameters make the conversion from encoder-counts to mm in the DUE configuration.
+	*Note: if the direction of a motor needs to be reversed, the position increments and decrements must be reversed in the stepper.c : 
+
+		void timer4_handler(void) routine
+		...
+		 if ((st.step_outbits & (1 << X_STEP_BIT)) && (st.dir_outbits & (1 << X_DIRECTION_BIT)) == 0)
+		    x_axis.target++;
+		  else if ((st.step_outbits & (1 << X_STEP_BIT)) && (st.dir_outbits & (1 << X_DIRECTION_BIT)))
+		    x_axis.target--;
+
+		// REVERSED the 'Right Motor'
+		  if ((st.step_outbits & (1 << Y_STEP_BIT)) && (st.dir_outbits & (1 << Y_DIRECTION_BIT)) == 0)
+		    y_axis.target--;  //=== !!
+		  else if ((st.step_outbits & (1 << Y_STEP_BIT)) && (st.dir_outbits & (1 << Y_DIRECTION_BIT)))
+		    y_axis.target++;  //=== !!
+		//
+
+		  if ((st.step_outbits & (1 << Z_STEP_BIT)) && (st.dir_outbits & (1 << Z_DIRECTION_BIT)) == 0)
+		    z_axis.target++;
+		  else if ((st.step_outbits & (1 << Z_STEP_BIT)) && (st.dir_outbits & (1 << Z_DIRECTION_BIT)))
+		    z_axis.target--;
+.*
+
+### Spindle Control
+The Arduino Due I/O point **16** outputs a PWM signal that corresponds to the currently programmed spindle speed. (S8000 for 8K RPM, M3 for spindle on, M5 for spindle off.) A converter such as this one from Amazon:  [PWM-to_Voltage Module](https://smile.amazon.com/gp/product/B0797NBC79/ref=ppx_yo_dt_b_asin_title_o03_s00?ie=UTF8&psc=1)
+allows direct control of a VFD or other speed control with a 0-10VDC input.
+
+### PID
+The following parameters may require some adjustment depending on the weight of the sled/router system being used.
+
+$40=25600 (X-axis Kp) : This is the proportion constant scaled as xx.xxx
+$41=17408 (X-axis Ki) : This is the integral constant scaled as xx.xxx
+$42=21504 (X-axis Kd) : This is the derivative constant scaled as xx.xxx
+$43=5000 (X-axis Imax) : This is the maximum integer value that the integrator can build to
+ 
+$50=25600 (Y-axis Kp)  : These are the PID constants for Y
+$51=17408 (Y-axis Ki) 
+$52=21504 (Y-axis Kd) 
+$53=5000 (Y-axis Imax) 
+
+$60=22528 (Z-axis Kp)  : These are the PID constants for Z 
+$61=17408 (Z-axis Ki) 
+$62=20480 (Z-axis Kd) 
+$63=5000 (Z-axis Imax) 

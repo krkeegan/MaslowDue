@@ -1,131 +1,184 @@
-// This file has been prepared for Doxygen automatic documentation generation.
-/*! \file ********************************************************************
-*
-* Atmel Corporation
-*
-* \li File:               eeprom.c
-* \li Compiler:           IAR EWAAVR 3.10c
-* \li Support mail:       avr@atmel.com
-*
-* \li Supported devices:  All devices with split EEPROM erase/write
-*                         capabilities can be used.
-*                         The example is written for ATmega48.
-*
-* \li AppNote:            AVR103 - Using the EEPROM Programming Modes.
-*
-* \li Description:        Example on how to use the split EEPROM erase/write
-*                         capabilities in e.g. ATmega48. All EEPROM
-*                         programming modes are tested, i.e. Erase+Write,
-*                         Erase-only and Write-only.
-*
-*                         $Revision: 1.6 $
-*                         $Date: Friday, February 11, 2005 07:16:44 UTC $
-****************************************************************************/
-#include <avr/io.h>
-#include <avr/interrupt.h>
+/*
+  This file is part of the Maslow Due Control Software.
+    The Maslow Due Control Software is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+    
+    Maslow Due Control Software is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+    You should have received a copy of the GNU General Public License
+    along with the Maslow Control Software.  If not, see <http://www.gnu.org/licenses/>.
 
-/* These EEPROM bits have different names on different devices. */
-#ifndef EEPE
-		#define EEPE  EEWE  //!< EEPROM program/write enable.
-		#define EEMPE EEMWE //!< EEPROM master program/write enable.
-#endif
+    Created by:  Larry D O'Cull 
+ 
+    BitBanged I2C to allow the use of any available pins
+    since Maslow shield uses SDA/SCL for encoder inputs. :(  
+*/
 
-/* These two are unfortunately not defined in the device include files. */
-#define EEPM1 5 //!< EEPROM Programming Mode Bit 1.
-#define EEPM0 4 //!< EEPROM Programming Mode Bit 0.
+#include "MaslowDue.h"
+#include "grbl.h"
+#include "eeprom.h"
 
-/* Define to reduce code size. */
-#define EEPROM_IGNORE_SELFPROG //!< Remove SPM flag polling.
+struct {
+  unsigned char control_byte;
+  unsigned char address_high;
+  unsigned char address_low;
+} ee_CS = {0,0,0};
 
-/*! \brief  Read byte from EEPROM.
- *
- *  This function reads one byte from a given EEPROM address.
- *
- *  \note  The CPU is halted for 4 clock cycles during EEPROM read.
- *
- *  \param  addr  EEPROM address to read from.
- *  \return  The byte read from the EEPROM address.
- */
+void eeprom_init(void)
+{
+    pinMode(SDApin, INPUT);
+    pinMode(SCLpin, OUTPUT);
+    digitalWrite(SCLpin, LOW); // default to inputs with pullups on
+}
+
+int eeprom_get_ack()
+{
+    int a;
+    
+    pinMode(SDApin, INPUT);     // prepare for acknowledge
+    delayMicroseconds(I2C_DELAY);  
+    digitalWrite(SCLpin, LOW);  // drop clk line   
+    delayMicroseconds(I2C_DELAY);  
+    digitalWrite(SCLpin, HIGH);  // raise clk line   
+    delayMicroseconds(I2C_DELAY);  
+    a = digitalRead(SDApin);
+    digitalWrite(SCLpin, LOW);  // drop clk line   
+    return a;
+}
+
+void eeprom_stop()
+{
+   pinMode(SDApin, OUTPUT);     // prepare for stop
+   digitalWrite(SDApin, LOW);  // clk line low (should be low from ack
+   delayMicroseconds(I2C_DELAY);  
+   digitalWrite(SCLpin, HIGH);  // clk line low (should be low from ack
+   delayMicroseconds(I2C_DELAY);  
+   pinMode(SDApin, INPUT);
+}
+
+int eeprom_start(int read_write)
+{
+    int i;
+    
+    pinMode(SCLpin, OUTPUT);
+    digitalWrite(SCLpin, LOW);
+    delayMicroseconds(I2C_DELAY); 
+    digitalWrite(SCLpin, HIGH);
+    pinMode(SDApin, OUTPUT);
+    digitalWrite(SDApin, HIGH);   // setup start state
+    delayMicroseconds(I2C_DELAY);          
+    digitalWrite(SDApin, LOW);   // setup start state
+    delayMicroseconds(I2C_DELAY);  
+    digitalWrite(SCLpin, LOW);   // SDA drops followed by SDA to create a start state
+    ee_CS.control_byte = 0 | (EECC<<1) | read_write;  // send out control byte
+    for(i=0; i<8; i++)
+    {
+          delayMicroseconds(I2C_DELAY);  
+          digitalWrite(SDApin,((ee_CS.control_byte >> (7-i)) & 1)); // shift out data
+          delayMicroseconds(I2C_DELAY);  
+          digitalWrite(SCLpin, HIGH);  // drop clk line   
+          delayMicroseconds(I2C_DELAY);          
+          digitalWrite(SCLpin, LOW);  // drop clk line   
+    }
+    return eeprom_get_ack();        
+}
+
+void eeprom_set_addr(byte read_write, uint16_t addr)
+{
+    int i, ack;
+    
+     // start condition
+    eeprom_init();    
+    ack = eeprom_start(EEWR);   // write control byte
+
+    digitalWrite(SCLpin, LOW);   // SDA drops followed by SDA to create a start state
+    delayMicroseconds(I2C_DELAY);  
+    pinMode(SDApin, OUTPUT);
+    ee_CS.address_high = addr >> 8;  // send out high address byte  
+    for(i=0; i<8; i++)
+    {
+          delayMicroseconds(I2C_DELAY);  
+          digitalWrite(SDApin,((ee_CS.address_high >> (7-i)) & 1)); // shift out data
+          delayMicroseconds(I2C_DELAY);  
+          digitalWrite(SCLpin, HIGH);  // drop clk line   
+          delayMicroseconds(I2C_DELAY);          
+          digitalWrite(SCLpin, LOW);  // drop clk line   
+    }
+    ack = eeprom_get_ack();   
+
+    ee_CS.address_low = addr & 0xFF;  // send out low address byte
+    digitalWrite(SCLpin, LOW);   // SDA drops followed by SDA to create a start state
+    delayMicroseconds(I2C_DELAY);      
+    pinMode(SDApin, OUTPUT);
+    for(i=0; i<8; i++)
+    {
+          delayMicroseconds(I2C_DELAY);  
+          digitalWrite(SDApin,((ee_CS.address_low >> (7-i)) & 1)); // shift out data
+          delayMicroseconds(I2C_DELAY);  
+          digitalWrite(SCLpin, HIGH);  // drop clk line   
+          delayMicroseconds(I2C_DELAY);          
+          digitalWrite(SCLpin, LOW);  // drop clk line   
+    }
+    ack = eeprom_get_ack(); 
+}
+
+unsigned char eeprom_get_current_address()
+{
+    int i;
+    byte databyte;
+    
+    eeprom_start(EERD);   //  control byte signals read
+    pinMode(SDApin, INPUT);
+    delayMicroseconds(I2C_DELAY);      
+    digitalWrite(SCLpin, LOW);   // SDA drops followed by SDA to create a start state
+    for(i=0; i<8; i++)
+    {
+          delayMicroseconds(I2C_DELAY);      
+          databyte <<= 1;
+          databyte |= digitalRead(SDApin); // shift in data
+          digitalWrite(SCLpin, HIGH);  // drop clk line   
+          delayMicroseconds(I2C_DELAY);  
+          digitalWrite(SCLpin, LOW);  // drop clk line   
+    }
+    //    eeprom_get_ack();         No acknowedge!
+    delayMicroseconds(I2C_DELAY);  
+    eeprom_stop();
+        
+    return databyte;
+}
 unsigned char eeprom_get_char( unsigned int addr )
 {
-	do {} while( EECR & (1<<EEPE) ); // Wait for completion of previous write.
-	EEAR = addr; // Set EEPROM address register.
-	EECR = (1<<EERE); // Start EEPROM read operation.
-	return EEDR; // Return the byte read from EEPROM.
+    eeprom_set_addr(EEWR, addr);    // write address for random read 
+    eeprom_get_current_address();
 }
 
-/*! \brief  Write byte to EEPROM.
- *
- *  This function writes one byte to a given EEPROM address.
- *  The differences between the existing byte and the new value is used
- *  to select the most efficient EEPROM programming mode.
- *
- *  \note  The CPU is halted for 2 clock cycles during EEPROM programming.
- *
- *  \note  When this function returns, the new EEPROM value is not available
- *         until the EEPROM programming time has passed. The EEPE bit in EECR
- *         should be polled to check whether the programming is finished.
- *
- *  \note  The EEPROM_GetChar() function checks the EEPE bit automatically.
- *
- *  \param  addr  EEPROM address to write to.
- *  \param  new_value  New EEPROM value.
- */
 void eeprom_put_char( unsigned int addr, unsigned char new_value )
 {
-	char old_value; // Old EEPROM value.
-	char diff_mask; // Difference mask, i.e. old value XOR new value.
+    int i;
+    
+    eeprom_set_addr(EEWR, addr);
 
-	cli(); // Ensure atomic operation for the write operation.
-	
-	do {} while( EECR & (1<<EEPE) ); // Wait for completion of previous write.
-	#ifndef EEPROM_IGNORE_SELFPROG
-	do {} while( SPMCSR & (1<<SELFPRGEN) ); // Wait for completion of SPM.
-	#endif
-	
-	EEAR = addr; // Set EEPROM address register.
-	EECR = (1<<EERE); // Start EEPROM read operation.
-	old_value = EEDR; // Get old EEPROM value.
-	diff_mask = old_value ^ new_value; // Get bit differences.
-	
-	// Check if any bits are changed to '1' in the new value.
-	if( diff_mask & new_value ) {
-		// Now we know that _some_ bits need to be erased to '1'.
-		
-		// Check if any bits in the new value are '0'.
-		if( new_value != 0xff ) {
-			// Now we know that some bits need to be programmed to '0' also.
-			
-			EEDR = new_value; // Set EEPROM data register.
-			EECR = (1<<EEMPE) | // Set Master Write Enable bit...
-			       (0<<EEPM1) | (0<<EEPM0); // ...and Erase+Write mode.
-			EECR |= (1<<EEPE);  // Start Erase+Write operation.
-		} else {
-			// Now we know that all bits should be erased.
-
-			EECR = (1<<EEMPE) | // Set Master Write Enable bit...
-			       (1<<EEPM0);  // ...and Erase-only mode.
-			EECR |= (1<<EEPE);  // Start Erase-only operation.
-		}
-	} else {
-		// Now we know that _no_ bits need to be erased to '1'.
-		
-		// Check if any bits are changed from '1' in the old value.
-		if( diff_mask ) {
-			// Now we know that _some_ bits need to the programmed to '0'.
-			
-			EEDR = new_value;   // Set EEPROM data register.
-			EECR = (1<<EEMPE) | // Set Master Write Enable bit...
-			       (1<<EEPM1);  // ...and Write-only mode.
-			EECR |= (1<<EEPE);  // Start Write-only operation.
-		}
-	}
-	
-	sei(); // Restore interrupt flag state.
+    digitalWrite(SCLpin, LOW);   // SDA drops followed by SDA to create a start state
+    delayMicroseconds(I2C_DELAY);      
+    pinMode(SDApin, OUTPUT);
+    for(i=0; i<8; i++)
+    {
+          delayMicroseconds(I2C_DELAY);  
+          digitalWrite(SDApin,((new_value >> (7-i)) & 1)); // shift out data
+          delayMicroseconds(I2C_DELAY);  
+          digitalWrite(SCLpin, HIGH);  // drop clk line   
+          delayMicroseconds(I2C_DELAY);          
+          digitalWrite(SCLpin, LOW);  // drop clk line   
+    }
+    eeprom_get_ack();   
+    eeprom_stop();
+ 
+    delayMicroseconds(EEPROM_WRITE_TIME);  // write cycle time for eeprom is 5ms
 }
-
-// Extensions added as part of Grbl 
-
 
 void memcpy_to_eeprom_with_checksum(unsigned int destination, char *source, unsigned int size) {
   unsigned char checksum = 0;
@@ -146,6 +199,157 @@ int memcpy_from_eeprom_with_checksum(char *destination, unsigned int source, uns
     *(destination++) = data; 
   }
   return(checksum == eeprom_get_char(source));
+}
+
+void store_current_machine_pos(void)
+{
+   memcpy_to_eeprom_with_checksum(EEPROM_ADDR_MACHINE_STATE+0x10,(char *)sys.position,sizeof(sys.position));
+   memcpy_to_eeprom_with_checksum(EEPROM_ADDR_MACHINE_STATE+0x40,(char *)pl.position,sizeof(pl.position));
+   memcpy_to_eeprom_with_checksum(EEPROM_ADDR_MACHINE_STATE+0x80,(char *)gc_state.coord_system,sizeof(gc_state.coord_system));
+   memcpy_to_eeprom_with_checksum(EEPROM_ADDR_MACHINE_STATE+0x100,(char *)gc_state.coord_offset,sizeof(gc_state.coord_offset));
+   memcpy_to_eeprom_with_checksum(EEPROM_ADDR_MACHINE_STATE+0x180,(char *)&gc_state.tool_length_offset,sizeof(gc_state.tool_length_offset));
+   DEBUG_COM_PORT.print("MPOS SAVED\n");
+}
+
+void recall_current_machine_pos(void)
+{
+   if(eeprom_get_char(EEPROM_ADDR_MACHINE_STATE) != 0x55) // test tag and init if not tagged
+   {
+      for(int i=0; i<0x200; i++)
+        eeprom_put_char(EEPROM_ADDR_MACHINE_STATE+i,0x00);
+      eeprom_put_char(EEPROM_ADDR_MACHINE_STATE,0x55);      
+      DEBUG_COM_PORT.print("EEMS Init\n");  
+   }
+   memcpy_from_eeprom_with_checksum((char *)sys.position,EEPROM_ADDR_MACHINE_STATE+0x10,sizeof(sys.position));
+   memcpy_from_eeprom_with_checksum((char *)pl.position,EEPROM_ADDR_MACHINE_STATE+0x40,sizeof(pl.position));
+   memcpy_from_eeprom_with_checksum((char *)gc_state.coord_system,EEPROM_ADDR_MACHINE_STATE+0x80,sizeof(gc_state.coord_system));
+   memcpy_from_eeprom_with_checksum((char *)gc_state.coord_offset,EEPROM_ADDR_MACHINE_STATE+0x100,sizeof(gc_state.coord_offset));
+   memcpy_from_eeprom_with_checksum((char *)&gc_state.tool_length_offset,EEPROM_ADDR_MACHINE_STATE+0x180,sizeof(gc_state.tool_length_offset));
+   DEBUG_COM_PORT.print("MPOS RECALLED\n");
+}
+
+
+unsigned char _cnvrt_char(unsigned char t)
+{
+    unsigned char temp = t;
+
+    if(temp < '9') temp -= '0';  // decimal digit
+    else if (temp >= 'a') temp -= 87; // lower case alpha
+    else temp -= 55;  // upper case alpha
+    
+    return temp;
+}
+
+unsigned char serial_parseHexByte()
+{
+    while (serial_get_rx_buffer_count() < 2)
+        ; 
+
+    // read the incoming byte:
+    unsigned char highChar = serial_read();
+    unsigned char lowChar = serial_read();
+    unsigned char temp = _cnvrt_char(highChar);
+    temp <<= 4;
+    temp |= _cnvrt_char(lowChar);
+
+    return temp;
+}
+
+unsigned int serial_parseHexInt()
+{
+    unsigned int dataword = serial_parseHexByte();
+    dataword <<= 8;
+    dataword |= serial_parseHexByte();
+
+    return dataword;
+}
+
+void EEPROM_viewer(void) 
+{
+  uint16_t addr;
+  byte data;
+  
+  MACHINE_COM_PORT.print("EEPROM:>\n");
+  while(1)
+  {
+    if ( serial_get_rx_buffer_count() > 0) 
+    {
+      byte incomingByte =  serial_read();
+      switch(incomingByte)
+      {
+
+        case 't':
+          data = serial_parseHexByte();
+          MACHINE_COM_PORT.print("0x");
+          MACHINE_COM_PORT.print(data,HEX);
+          MACHINE_COM_PORT.print(",");
+          MACHINE_COM_PORT.print(data,DEC);
+          MACHINE_COM_PORT.print("\n");
+          break;
+          
+        case 'w':
+          addr = serial_parseHexInt();
+          data = serial_parseHexByte();
+          eeprom_put_char(addr,data);   
+          MACHINE_COM_PORT.print("W");
+          MACHINE_COM_PORT.print(">0x");
+          MACHINE_COM_PORT.print(addr, HEX);
+          MACHINE_COM_PORT.print("=0x");
+          data = eeprom_get_char(addr);
+          MACHINE_COM_PORT.print(data, HEX);
+          MACHINE_COM_PORT.print("\n");
+          break;
+           
+        case 'r':
+          addr = serial_parseHexInt();
+          MACHINE_COM_PORT.print("R");
+          MACHINE_COM_PORT.print(">0x");
+          MACHINE_COM_PORT.print(addr, HEX);
+          MACHINE_COM_PORT.print("=0x");       
+          data = eeprom_get_char(addr);
+          MACHINE_COM_PORT.print(data, HEX);
+          MACHINE_COM_PORT.print("\n");
+          break;
+
+                     
+        case 'n':
+          MACHINE_COM_PORT.print("N");
+          MACHINE_COM_PORT.print(">0x");     
+          data = eeprom_get_current_address();
+          MACHINE_COM_PORT.print(data, HEX);
+          MACHINE_COM_PORT.print("\n");
+          break;
+
+        case 'd':
+          addr = serial_parseHexInt(); // dump block from address   
+        case ' ':     
+          for(int a=0; a<16; a++)
+          {
+              MACHINE_COM_PORT.print("\n0x");
+    
+              if(addr > 0x7FF0) addr = 0;
+
+              MACHINE_COM_PORT.print(addr + (a*16),HEX);
+              MACHINE_COM_PORT.print(" - ");
+              data = eeprom_get_char(addr + (a*16));
+              for(int p=0; p<16; p++)
+              {
+                 MACHINE_COM_PORT.print(" 0x");
+                 MACHINE_COM_PORT.print(data,HEX);
+                 MACHINE_COM_PORT.print(" ");
+                 data = eeprom_get_current_address();
+              }
+          }
+          addr += 256;
+          MACHINE_COM_PORT.print("\n");
+          break;
+
+        case 'x':
+          return;
+      }
+
+    }
+  }
 }
 
 // end of file
